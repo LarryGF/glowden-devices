@@ -4,16 +4,24 @@
 //! hosted on PipeWire by host.c as a virtual microphone. GlowDen talks to this program
 //! with JSON lines on stdin/stdout:
 //!
-//!   {"id":1,"method":"describe"}                 → controls, switches, effect modes
+//!   {"id":1,"method":"describe"}         → fine-tuning controls and switches, effect stages
 //!   {"id":2,"method":"summarize","params":{"presets":[{"name","settings"}]}}
-//!   {"id":3,"method":"start","params":{"engine","source","name","description","voice","effects"}}
-//!   {"id":4,"method":"apply","params":{"voice","effects"}}
-//!   {"id":5,"method":"process","params":{"engine","in","out","voice","effects"}}
+//!                                         → per VO!CE preset: key numbers and a note
+//!   {"id":3,"method":"summarize_effects","params":{"effects":[{"name","settings"}]}}
+//!                                         → per effect preset: what it turns on
+//!   {"id":4,"method":"start","params":{"engine","source","name","description","voice","effects"}}
+//!   {"id":5,"method":"stop"}             → stops the virtual microphone
+//!   {"id":6,"method":"apply","params":{"voice","effects"}}
+//!   {"id":7,"method":"preview","params":{"engine","file"}}
+//!                                         → loops a recording through the current settings
+//!                                           to the speakers (the mic test); `apply` updates it
+//!   {"id":8,"method":"preview_stop"}
+//!   {"id":9,"method":"process","params":{"engine","in","out","voice","effects"}}
 //!
-//! Replies are {"id","result"} or {"id","error"}; while running it also sends
+//! Replies are {"id","result"} or {"id","error"}; while the microphone runs it also sends
 //! {"event":"levels","input":dB,"output":dB} about ten times a second. `voice` is a G HUB
 //! VO!CE preset's settings, `effects` a G HUB voice effect preset's (either may be null).
-//! The host stops when stdin closes.
+//! Everything stops when stdin closes.
 
 use std::ffi::{CString, c_char, c_int};
 use std::io::{BufRead, Write};
@@ -52,8 +60,18 @@ fn send(v: &Value) {
     let _ = out.flush();
 }
 
+fn stop(child: &mut Option<Child>) {
+    if let Some(mut c) = child.take() {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+}
+
 fn serve() {
-    let mut host: Option<Child> = None;
+    let mut live: Option<Child> = None;
+    let mut preview: Option<Child> = None;
+    // The settings last started or applied; a preview starts with them.
+    let mut current = json!({ "voice": null, "effects": null });
     for line in std::io::stdin().lock().lines().map_while(Result::ok) {
         let Ok(msg) = serde_json::from_str::<Value>(&line) else {
             continue;
@@ -67,17 +85,58 @@ fn serve() {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .filter_map(|x| Some((x["name"].as_str()?.to_string(), summary(&x["settings"]))))
+                    .filter_map(|x| {
+                        let name = x["name"].as_str()?;
+                        let mut sum = summary(&x["settings"]);
+                        sum["note"] = json!(preset_note(name));
+                        Some((name.to_string(), sum))
+                    })
                     .collect(),
             )),
-            "start" => start(p).map(|child| {
-                if let Some(mut old) = host.replace(child) {
-                    let _ = old.kill();
-                    let _ = old.wait();
+            "summarize_effects" => Ok(Value::Object(
+                p["effects"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|x| Some((x["name"].as_str()?.to_string(), json!(effect_chips(&x["settings"])))))
+                    .collect(),
+            )),
+            "start" => {
+                current = json!({ "voice": p["voice"], "effects": p["effects"] });
+                stop(&mut live);
+                start(p).map(|child| {
+                    live = Some(child);
+                    Value::Null
+                })
+            }
+            "stop" => {
+                stop(&mut live);
+                Ok(Value::Null)
+            }
+            "apply" => {
+                current = json!({ "voice": p["voice"], "effects": p["effects"] });
+                let mut result = Ok(Value::Null);
+                for child in [live.as_mut(), preview.as_mut()].into_iter().flatten() {
+                    if let Err(e) = apply(child, p) {
+                        result = Err(e);
+                    }
                 }
-                Value::Null
-            }),
-            "apply" => apply(host.as_mut(), p),
+                result
+            }
+            "preview" => {
+                stop(&mut preview);
+                let mut params = current.clone();
+                params["engine"] = p["engine"].clone();
+                params["file"] = p["file"].clone();
+                start_preview(&params).map(|child| {
+                    preview = Some(child);
+                    Value::Null
+                })
+            }
+            "preview_stop" => {
+                stop(&mut preview);
+                Ok(Value::Null)
+            }
             "process" => process(p),
             m => Err(format!("unknown method {m}")),
         };
@@ -86,10 +145,8 @@ fn serve() {
             Err(e) => json!({ "id": id, "error": e }),
         });
     }
-    if let Some(mut h) = host {
-        let _ = h.kill();
-        let _ = h.wait();
-    }
+    stop(&mut live);
+    stop(&mut preview);
 }
 
 fn settings_args(p: &Value) -> Vec<String> {
@@ -123,13 +180,25 @@ fn start(p: &Value) -> Result<Child, String> {
     Ok(child)
 }
 
-fn apply(host: Option<&mut Child>, p: &Value) -> Result<Value, String> {
-    let host = host.ok_or("not started")?;
+fn apply(host: &mut Child, p: &Value) -> Result<Value, String> {
     let stdin = host.stdin.as_mut().ok_or("host has no input")?;
     writeln!(stdin, "{}", settings_args(p).join(" "))
         .and_then(|_| stdin.flush())
         .map_err(|e| format!("host stopped: {e}"))?;
     Ok(Value::Null)
+}
+
+fn start_preview(p: &Value) -> Result<Child, String> {
+    let s = |k: &str| p[k].as_str().ok_or_else(|| format!("preview needs {k}"));
+    Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
+        .arg("host")
+        .arg(s("engine")?)
+        .args(["--name", "glowden-voice-preview", "--description", "GlowDen mic test", "--play", s("file")?])
+        .args(settings_args(p))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("cannot start the preview: {e}"))
 }
 
 fn process(p: &Value) -> Result<Value, String> {
@@ -147,17 +216,140 @@ fn process(p: &Value) -> Result<Value, String> {
 }
 
 fn describe() -> Value {
+    let modes = |list: &[&str]| -> Value {
+        json!(list.iter().map(|m| json!({ "value": m, "label": mode_label(m) })).collect::<Vec<_>>())
+    };
+    let slider = |field: &str, label: &str, min: f64, max: f64, step: f64, unit: &str| {
+        json!({ "field": field, "label": label, "min": min, "max": max, "step": step, "unit": unit })
+    };
+    let pick = |field: &str, label: &str, list: &[&str]| json!({ "field": field, "label": label, "modes": modes(list) });
     json!({
         "controls": CONTROLS.iter().map(|(path, group, label, min, max, step, unit)| {
             json!({ "path": path, "group": group, "label": label, "min": min, "max": max, "step": step, "unit": unit })
         }).collect::<Vec<_>>(),
         "switches": SWITCHES.iter().map(|(group, path)| json!({ "group": group, "path": path })).collect::<Vec<_>>(),
-        "effect_modes": {
-            "vocalMode": VOCAL_MODES, "phaserMode": PHASER_MODES, "shapeMode": SHAPE_MODES,
-            "reflectionMode": REFLECTION_MODES, "inputMode": INPUT_MODES,
-            "feedbackMode": FEEDBACK_MODES, "feedbackTimbre": FEEDBACK_TIMBRES,
-        },
+        // The voice effect controls, with G HUB's ranges; "enable" is a stage's on/off field.
+        "effect_stages": [
+            { "stage": "vocalChanger", "title": "Voice", "controls": [
+                pick("vocalMode1", "Primary voice", VOCAL_MODES),
+                slider("voiceModFactor1", "Primary amount", -2400.0, 2400.0, 50.0, "cents"),
+                slider("voiceGain1", "Primary level", -60.0, 0.0, 1.0, "dB"),
+                pick("vocalMode2", "Secondary voice", VOCAL_MODES),
+                slider("voiceModFactor2", "Secondary amount", -2400.0, 2400.0, 50.0, "cents"),
+                slider("voiceGain2", "Secondary level", -60.0, 0.0, 1.0, "dB"),
+            ]},
+            { "stage": "vocalChanger", "title": "Chorus", "enable": "chorusEnabled", "controls": [
+                slider("chorusDelay", "Delay", 0.0, 100.0, 1.0, "ms"),
+                slider("chorusDelayMod", "Delay swing", 0.0, 100.0, 1.0, "ms"),
+                slider("chorusDelayModRate", "Delay swing rate", 0.0, 2.0, 0.05, "Hz"),
+                slider("chorusPitchMod", "Pitch swing", -600.0, 600.0, 10.0, "cents"),
+                slider("chorusPitchModRate", "Pitch swing rate", 0.0, 2.0, 0.05, "Hz"),
+            ]},
+            { "stage": "flangerPhaser", "title": "Flanger / phaser", "enable": "enabled", "controls": [
+                pick("phaserMode", "Mode", PHASER_MODES),
+                slider("depth", "Depth", 0.0, 1.0, 0.05, ""),
+                slider("rate", "Rate", 0.0, 5.0, 0.1, "Hz"),
+            ]},
+            { "stage": "ringModulation", "title": "Ring modulator", "enable": "enabled", "controls": [
+                pick("shapeMode", "Shape", SHAPE_MODES),
+                slider("carrierFrequency", "Frequency", 1.0, 2000.0, 10.0, "Hz"),
+                slider("mix", "Mix", 0.0, 1.0, 0.05, ""),
+            ]},
+            { "stage": "reverb", "title": "Reverb", "enable": "enabled", "controls": [
+                pick("reflectionMode", "Reflections", REFLECTION_MODES),
+                slider("mix", "Mix", 0.0, 1.0, 0.05, ""),
+                slider("reflectionLowPassFrequency", "Reflection low-pass", 10.0, 10000.0, 20.0, "Hz"),
+                slider("earlyLateMix", "Early / late", 0.0, 1.0, 0.05, ""),
+                slider("roomSize", "Room size", 0.01, 1.0, 0.05, ""),
+            ]},
+            { "stage": "delay", "title": "Echo", "enable": "enabled", "controls": [
+                pick("inputMode", "Input", INPUT_MODES),
+                pick("feedbackMode", "Feedback routing", FEEDBACK_MODES),
+                pick("feedbackTimbre", "Feedback tone", FEEDBACK_TIMBRES),
+                slider("mix", "Mix", 0.0, 1.0, 0.05, ""),
+                slider("feedback", "Feedback", 0.0, 0.6, 0.05, ""),
+                slider("leftDelay", "Left delay", 10.0, 2000.0, 10.0, "ms"),
+                slider("rightDelay", "Right delay", 10.0, 2000.0, 10.0, "ms"),
+            ]},
+        ],
     })
+}
+
+/// "VOCAL_MODE_FORMANT_WARP" → "Formant warp".
+fn mode_label(mode: &str) -> String {
+    let mut w = mode.to_string();
+    for prefix in ["VOCAL_MODE_", "PHASER_MODE_", "REFLECTION_MODE_", "SHAPE_MODE_", "INPUT_MODE_", "FEEDBACK_MODE_", "FEEDBACK_TIMBRE_"] {
+        if let Some(rest) = w.strip_prefix(prefix) {
+            w = rest.to_string();
+            break;
+        }
+    }
+    let w = w.replace('_', " ").to_lowercase();
+    let w = match w.as_str() {
+        "st flutter" => "stereo flutter".to_string(),
+        "noice" => "noise".to_string(),
+        "whispez" => "whisper".to_string(),
+        "halfwaverectifier" => "half-wave".to_string(),
+        "saw tooth" => "sawtooth".to_string(),
+        "largediff" => "large diffuse".to_string(),
+        "midmix" => "mid mix".to_string(),
+        _ => w,
+    };
+    let mut c = w.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+/// Our own wording for G HUB's VO!CE preset names, "<placement> - <character>".
+fn preset_note(name: &str) -> String {
+    let (place, character) = name.split_once(" - ").unwrap_or((name, ""));
+    let how = match character {
+        "Natural" => "Lightest processing, closest to the mic's own sound.",
+        "Classic" => "All-round cleanup with a balanced tone.",
+        "More Bass" | "Bass Boost" => "Warmer and fuller: bass up, muddy mids down.",
+        "Broadcaster" => "Radio voice: strong compression for an even, up-front level.",
+        "Increase Clarity" => "Brighter and crisper, for speech that cuts through.",
+        _ => "",
+    };
+    let r#where = match place {
+        "Desk" => "Mic on the desk, further from your mouth: more gain.",
+        "Boom Arm" => "Mic on a boom arm, close to your mouth.",
+        _ => "",
+    };
+    [how, r#where].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" ")
+}
+
+/// What an effect preset turns on, as short labels.
+fn effect_chips(s: &Value) -> Vec<String> {
+    let on = |stage: &str, key: &str| s[stage][key] == true;
+    let mut out = Vec::new();
+    let v = &s["vocalChanger"];
+    for (mode, factor) in [("vocalMode1", "voiceModFactor1"), ("vocalMode2", "voiceModFactor2")] {
+        let Some(m) = v[mode].as_str().filter(|m| *m != "VOCAL_MODE_OFF") else {
+            continue;
+        };
+        let semis = (v[factor].as_f64().unwrap_or(0.0) / 10.0).round() / 10.0;
+        out.push(if m.contains("PITCH") || m.contains("FORMANT") {
+            format!("{} {}{} st", mode_label(m), if semis > 0.0 { "+" } else { "" }, semis)
+        } else {
+            mode_label(m)
+        });
+    }
+    if on("vocalChanger", "chorusEnabled") {
+        out.push("Chorus".into());
+    }
+    if on("flangerPhaser", "enabled") {
+        out.push(mode_label(s["flangerPhaser"]["phaserMode"].as_str().unwrap_or("PHASER_MODE_FLANGER_UP")));
+    }
+    if on("ringModulation", "enabled") {
+        out.push(format!("Ring mod {} Hz", s["ringModulation"]["carrierFrequency"].as_f64().unwrap_or(0.0)));
+    }
+    if on("reverb", "enabled") {
+        out.push("Reverb".into());
+    }
+    if on("delay", "enabled") {
+        out.push("Echo".into());
+    }
+    out
 }
 
 /// Preset field → (offset in the engine's parameter block, 'f' float or 'b' byte).

@@ -13,7 +13,8 @@
  * "@flanger", "@ring", "@reverb", "@delay", each followed by its own f/b/u triples. Settings
  * before any section are VO!CE's; once sections are used, a stage left out is bypassed.
  * The output is stereo (the reverb and delay stages are).
- * With --process IN.wav OUT.wav it processes a recording instead (48 kHz mono float WAV, as
+ * With --play TAKE.wav it loops that recording through the engine to the speakers, taking new
+ * settings on stdin (the mic test). With --process IN.wav OUT.wav it processes a recording instead (48 kHz mono float WAV, as
  * pw-record writes it with --format f32; the result is stereo), for comparing presets on the
  * same take.
  */
@@ -172,6 +173,23 @@ static void on_capture(void *data)
     }
 }
 
+/* --play: the recorded take, looped through the engine into the speakers (G HUB's mic test). */
+static float *take;
+static size_t take_len, take_pos;
+
+static void fill_from_take(size_t want)
+{
+    float frame[2 * BLOCK];
+    while (st.done.len < want) {
+        for (int n = 0; n < BLOCK; n++) {
+            st.in[n] = take[take_pos];
+            take_pos = (take_pos + 1) % take_len;
+        }
+        if (process_block(frame) == 0) fifo_push(&st.done, frame, 2 * BLOCK);
+        else break;
+    }
+}
+
 static void on_source(void *data)
 {
     struct pw_buffer *b = pw_stream_dequeue_buffer(st.source);
@@ -187,6 +205,10 @@ static void on_source(void *data)
 #endif
     uint32_t n = 2 * frames;
     float *dst = d->data;
+    if (take) {
+        fill_from_take(n + 2 * BLOCK);
+        st.primed = 1;
+    }
     /* Start once a little audio is buffered, so the first reads don't underrun. While no app
      * reads the virtual mic, processed audio piles up; keep only the newest so a recording
      * that starts later isn't delayed by it. */
@@ -395,17 +417,18 @@ static const struct spa_pod *stereo_format(struct spa_pod_builder *b)
 
 /* Offline: run a 48 kHz mono float WAV through the engine into a stereo WAV. The output is
  * shifted by VO!CE's latency so it lines up with the input. */
-static int process_file(const char *in_path, const char *out_path)
+/* A 48 kHz mono float WAV (as pw-record writes it with --format f32): its samples, or NULL. */
+static float *read_wav(const char *in_path, size_t *count, size_t extra)
 {
     FILE *in = fopen(in_path, "rb");
     if (!in) {
         fprintf(stderr, "blue-voice: cannot open %s\n", in_path);
-        return 1;
+        return NULL;
     }
     uint8_t head[12];
     if (fread(head, 1, 12, in) != 12 || memcmp(head, "RIFF", 4) || memcmp(head + 8, "WAVE", 4)) {
         fprintf(stderr, "blue-voice: %s is not a WAV file\n", in_path);
-        return 1;
+        return NULL;
     }
     uint32_t len = 0, rate = 0;
     uint16_t format = 0, channels = 0;
@@ -426,12 +449,21 @@ static int process_file(const char *in_path, const char *out_path)
     }
     if (memcmp(id, "data", 4) || format != 3 || channels != 1 || rate != RATE) {
         fprintf(stderr, "blue-voice: %s must be 48 kHz mono float\n", in_path);
-        return 1;
+        return NULL;
     }
-    size_t n = len / sizeof(float), latency = st.cv2_active ? 1280 : 0;
-    float *samples = calloc(n + latency + BLOCK, sizeof(float));
+    size_t n = len / sizeof(float);
+    float *samples = calloc(n + extra, sizeof(float));
     n = fread(samples, sizeof(float), n, in);
     fclose(in);
+    *count = n;
+    return samples;
+}
+
+static int process_file(const char *in_path, const char *out_path)
+{
+    size_t n = 0, latency = st.cv2_active ? 1280 : 0;
+    float *samples = read_wav(in_path, &n, latency + BLOCK);
+    if (!samples) return 1;
     float *result = calloc(2 * (n + latency + BLOCK), sizeof(float));
     for (size_t at = 0; at < n + latency; at += BLOCK) {
         memcpy(st.in, samples + at, BLOCK * sizeof(float));
@@ -466,7 +498,7 @@ int blue_voice_host_main(int argc, char **argv)
         return 2;
     }
     const char *target = NULL, *name = "glowden-voice-mic", *description = "Blue VO!CE";
-    const char *process_in = NULL, *process_out = NULL;
+    const char *process_in = NULL, *process_out = NULL, *play = NULL;
     static cv2_config cfg = {RATE, BLOCK, 1, RATE, BLOCK, 2, {0}};
 
     pe_image *img = pe_load(argv[1]);
@@ -512,6 +544,7 @@ int blue_voice_host_main(int argc, char **argv)
         if (!strcmp(argv[i], "--target") && i + 1 < argc) target = argv[++i];
         else if (!strcmp(argv[i], "--name") && i + 1 < argc) name = argv[++i];
         else if (!strcmp(argv[i], "--description") && i + 1 < argc) description = argv[++i];
+        else if (!strcmp(argv[i], "--play") && i + 1 < argc) play = argv[++i];
         else if (!strcmp(argv[i], "--process") && i + 2 < argc) {
             process_in = argv[++i];
             process_out = argv[++i];
@@ -541,6 +574,10 @@ int blue_voice_host_main(int argc, char **argv)
     st.right = aligned_alloc(32, BLOCK * sizeof(float));
     apply_settings(&initial, 1);
     if (process_in) return process_file(process_in, process_out);
+    if (play) {
+        take = read_wav(play, &take_len, 0);
+        if (!take || take_len == 0) return 1;
+    }
 
     struct stat out_stat;
     st.meter = fstat(STDOUT_FILENO, &out_stat) == 0 && S_ISFIFO(out_stat.st_mode);
@@ -555,6 +592,25 @@ int blue_voice_host_main(int argc, char **argv)
     struct spa_source *timer = pw_loop_add_timer(pw_main_loop_get_loop(st.loop), check_parent, NULL);
     struct timespec second = {1, 0};
     pw_loop_update_timer(pw_main_loop_get_loop(st.loop), timer, &second, &second, false);
+
+    if (play) {
+        /* A plain playback stream to the default output; settings still arrive on stdin. */
+        struct pw_properties *pp = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback",
+                                                     PW_KEY_MEDIA_ROLE, "Music", PW_KEY_NODE_NAME, name,
+                                                     PW_KEY_NODE_DESCRIPTION, description, PW_KEY_NODE_LATENCY,
+                                                     "1024/48000", NULL);
+        st.source = pw_stream_new_simple(pw_main_loop_get_loop(st.loop), name, pp, &source_events, NULL);
+        uint8_t pbuf[1024];
+        struct spa_pod_builder pb = SPA_POD_BUILDER_INIT(pbuf, sizeof pbuf);
+        const struct spa_pod *pparams[1] = {stereo_format(&pb)};
+        pw_stream_connect(st.source, PW_DIRECTION_OUTPUT, PW_ID_ANY,
+                          PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS, pparams, 1);
+        pw_main_loop_run(st.loop);
+        pw_stream_destroy(st.source);
+        pw_main_loop_destroy(st.loop);
+        pw_deinit();
+        return 0;
+    }
 
     struct pw_properties *cp = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Capture",
                                                  PW_KEY_MEDIA_ROLE, "Communication", PW_KEY_NODE_NAME,
