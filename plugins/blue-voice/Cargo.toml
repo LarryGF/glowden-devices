@@ -1,0 +1,12 @@
+[package]
+name = "glowden-blue-voice"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "GlowDen plugin: Blue VO!CE and voice effects from the user's own DTS ClearVoice 2 engine"
+
+[dependencies]
+serde_json = "1"
+
+[build-dependencies]
+cc = "1"

@@ -1,0 +1,16 @@
+name = "Yeti GX"
+kind = "microphone"
+products = [0x0afc]
+ghub_model = "yeti_gx"
+
+
+# Blue VO!CE runs on the host: the blue-voice plugin processes this PipeWire source and offers the
+# result as a separate microphone.
+[voice]
+# The plugin that runs Blue VO!CE (plugins/blue-voice in this repo).
+plugin = "blue-voice"
+source = "Logitech_Yeti_GX"
+description = "Yeti GX (Blue VO!CE)"
+# Sent when VO!CE is switched on or its preset changes, as G HUB does (USB capture
+# voice-toggle): microphone feature 0x8370, function 3, sub-setting 05 ("smart lock").
+on_enable = ["8370:3:0005070000ae000002"]

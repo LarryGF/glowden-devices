@@ -1,0 +1,20 @@
+name = "G515 LS TKL"
+kind = "keyboard"
+products = [0x40b4]
+ghub_model = "g515_ls_tkl"
+
+[layout]
+keys = "iso-tkl"
+zones = "hid-usage"
+
+[input]
+reactive = true
+
+# Keys light up and ripple outward on press, run by the keyboard itself.
+# Parameter bytes from a G HUB capture; only the color is known to vary.
+[[firmware_effect]]
+id = "ripple"
+label = "Ripple"
+cluster = 0xff
+effect_id = 0x0017
+params = "{r}{g}{b}ff01000014"

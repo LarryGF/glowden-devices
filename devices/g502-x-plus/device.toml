@@ -1,0 +1,98 @@
+name = "G502 X PLUS"
+kind = "mouse"
+products = [0x4099]
+ghub_model = "g502x_plus"
+
+# In host mode the mouse leaves its DPI buttons to the host; these are their button-spy
+# (0x8110) masks, from a G HUB capture.
+[input]
+dpi_up = 0x0200
+dpi_down = 0x0400
+dpi_shift = 0x0010
+# G HUB's routing: back/forward reach the PC as buttons 4 and 5 (what browsers use); DPI
+# shift, DPI up/down and buttons 7–9 are left to the host.
+routing = [1, 2, 3, 4, 0, 5, 0, 0, 0, 0, 0]
+
+[layout]
+# Offline fallback: our own outline, with LED geometry from the imported metadata.json.
+picture = "g502-x-plus.svg"
+picture_clip = "M300 190 C 420 60, 970 60, 1090 190 C 1260 430, 1330 900, 1300 1500 C 1290 1900, 1250 2350, 1050 2560 C 900 2690, 490 2690, 340 2560 C 140 2350, 100 1900, 90 1500 C 60 900, 130 430, 300 190 Z"
+
+# Logitech's public product photo, downloaded once on first use and kept in
+# ~/.local/share/glowden/devices/<model>/ (not shipped). crop = x, y, width, height of the mouse.
+# Plain f_png: "q_auto" makes the CDN send a 256-color version with jagged edges.
+# "vivid" cutout: strongly colored pixels inside the LED regions (the lit strip) become
+# openings that show the live zone colors.
+[layout.photo]
+url = "https://resource.logitechg.com/f_png/content/dam/gaming/en/products/g502x-plus/2026-update/gallery/g502-x-plus-top-angle-black-gallery-1.png"
+crop = [716, 198, 1046, 1761]
+cutout = "vivid"
+
+# LED regions in the cropped photo, ordered along the strip (left end to the right fork),
+# following the LED positions in G HUB's metadata. Zone ids are the 0x8081 zones 1-8.
+
+[[layout.photo.led]]
+zone = 1
+path = "M0 850 L517 850 L534 937 L69 1761 L0 1761 Z"
+
+[[layout.photo.led]]
+zone = 4
+path = "M364 1761 L69 1761 L534 937 L538 948 Z"
+
+[[layout.photo.led]]
+zone = 5
+path = "M621 1093 L549 1761 L364 1761 L538 948 Z"
+
+[[layout.photo.led]]
+zone = 2
+path = "M732 1211 L719 1548 L596 1761 L549 1761 L621 1093 Z"
+
+[[layout.photo.led]]
+zone = 6
+path = "M719 1548 L732 1211 L745 1218 L857 1442 Z"
+
+[[layout.photo.led]]
+zone = 7
+path = "M1046 1297 L1046 1413 L857 1442 L745 1218 Z"
+
+[[layout.photo.led]]
+zone = 3
+path = "M517 850 L1046 850 L1046 1297 L745 1218 L732 1211 L621 1093 L538 948 L534 937 Z"
+
+[[layout.photo.led]]
+zone = 8
+path = "M1046 1413 L1046 1761 L596 1761 L719 1548 L857 1442 Z"
+
+# Button-spy numbers (0x8110). 1–6, 10 and 11 from a G HUB capture: G HUB routes 4 and 6 to
+# the PC's back/forward buttons and handles 5, 10 and 11 itself. 7–9 are unidentified.
+[[button]]
+number = 1
+label = "Left click"
+
+[[button]]
+number = 2
+label = "Right click"
+
+[[button]]
+number = 3
+label = "Middle click"
+
+[[button]]
+number = 4
+label = "Back"
+
+[[button]]
+number = 5
+label = "DPI shift"
+
+[[button]]
+number = 6
+label = "Forward"
+
+[[button]]
+number = 10
+label = "DPI up"
+
+[[button]]
+number = 11
+label = "DPI down"

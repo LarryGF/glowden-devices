@@ -1,0 +1,5 @@
+name = "G522 LIGHTSPEED"
+kind = "headset"
+# 0x0b18: LIGHTSPEED dongle; 0x0b19: wired.
+products = [0x0b18, 0x0b19]
+ghub_model = "g522"

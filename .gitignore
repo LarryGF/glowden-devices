@@ -1,0 +1,6 @@
+/target
+/dist
+plugins/blue-voice/probes/*
+!plugins/blue-voice/probes/*.c
+!plugins/blue-voice/probes/*.py
+!plugins/blue-voice/probes/Makefile
