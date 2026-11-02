@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="300" alt="GlowDen"></p>
+
 # GlowDen devices
 
 Device definitions and plugins for [GlowDen](https://github.com/larryGF/glowden), the open
