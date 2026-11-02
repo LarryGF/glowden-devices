@@ -13,7 +13,10 @@ import json
 import pathlib
 import platform
 import shutil
-import tomllib
+try:
+    import tomllib
+except ImportError:  # Python < 3.11
+    import tomli as tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 

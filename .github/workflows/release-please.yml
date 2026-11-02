@@ -1,0 +1,58 @@
+name: release-please
+
+# Conventional commits on main open/refresh a release PR; merging it tags a release, and the
+# publish job builds the source (index.json, definitions, plugin binaries) and attaches it to
+# that release. GlowDen reads it from releases/latest/download/index.json. Dispatch with a
+# tag to (re)publish an existing release.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to (re)publish, e.g. v0.2.0. Empty = run release-please."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    if: inputs.tag == '' || inputs.tag == null
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: release-please-oss/release-please-action@0a385bebb853de7961b38d9a2d92fcba4eb7a23b # v6.0.3
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    if: always() && (inputs.tag != '' && inputs.tag != null || needs.release-please.outputs.released == 'true')
+    # Plugins are built on the oldest supported base (glibc 2.35) so they run on any newer one.
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - name: Build plugins
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpipewire-0.3-dev pkg-config
+          rustup toolchain install stable --profile minimal
+          cargo build --release --locked
+      - name: Build the source
+        run: |
+          pip install tomli
+          tools/make-index.py dist --version "${TAG#v}" --plugin blue-voice=target/release/glowden-blue-voice
+      - name: Attach to the release
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
