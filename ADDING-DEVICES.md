@@ -1,6 +1,6 @@
 # Adding a device
 
-Most Logitech G devices speak HID++ 2.0 and report their features. glowden drives the standard
+Most Logitech G devices speak HID++ 2.0 and report their features. GlowDen drives the standard
 ones for any device that has them, without a definition:
 
 | Feature | What works automatically |
@@ -20,13 +20,13 @@ positions, key geometry, buttons the host has to handle, and firmware-only effec
 1. **Identify the device.** `target/release/glowdenctl list` prints each device with its USB
    product id and HID++ features. Note the product id (`046d:XXXX`) and which of the
    features above it has.
-2. **Write a minimal definition** in `drivers/<device>.toml` (or
-   `~/.local/share/glowden/drivers/` for a personal one):
+2. **Write a minimal definition** in `devices/<id>/device.toml` in this repo (or
+   `~/.local/share/glowden/drivers/<id>.toml` for a personal one):
    ```toml
    name = "G502 X PLUS"
    kind = "mouse"            # keyboard | mouse | headset | microphone
    products = [0x4099]       # receiver-attached devices: the device's own id, not the receiver's
-   ghub_model = "g502x_plus" # folder for its pictures in ~/.local/share/glowden/devices/
+   ghub_model = "g502x_plus" # G HUB's model name, to find its picture package
    ```
 3. **Restart the service** and check its log. When the app started the service, kill it
    (`for p in $(pgrep -x glowdend); do kill $p; done`) and the app starts it again; otherwise
@@ -41,30 +41,25 @@ positions, key geometry, buttons the host has to handle, and firmware-only effec
 
 ## Pictures
 
-The viewer lights the LEDs in the device picture. Three sources, in the order glowden tries
+The viewer lights the LEDs in the device picture. Three sources, in the order GlowDen tries
 them:
 
 ### 1. G HUB's own pictures (best)
 
-G HUB keeps per-device packages with pictures and LED geometry. Copy
-`C:\ProgramData\LGHUB\depots` from a Windows install that has seen the device, then:
-
-```sh
-glowdenctl import-ghub /path/to/depots
-```
-
-Packages land in `~/.local/share/glowden/devices/<model>/`. glowden picks the picture whose pixel
+G HUB keeps per-device packages with pictures and LED geometry in
+`C:\ProgramData\LGHUB\depots`. Users add that folder (or the whole Windows drive) in
+GlowDen → Settings → G HUB files; GlowDen reads the package in place. It picks the picture whose pixel
 size matches the LED geometry in `metadata.json`. These pictures have transparent cutouts
 where light shines through (key legends, logos, diffusers), and the live colors are drawn
 behind them, as G HUB does. Nothing needs to go in the definition beyond `ghub_model`.
 
-Some packages ship encrypted pictures (files that start with `21 05 21 20`). The importer
-skips them; use a product photo instead.
+Some packages ship encrypted pictures (files that start with `21 05 21 20`). GlowDen skips
+them; use a product photo instead.
 
 ### 2. A product photo
 
 The manufacturer's public product photo, downloaded once by the service into
-`~/.local/share/glowden/devices/<model>/product-photo.png`. It is never shipped with glowden.
+`~/.cache/glowden/photos/<model>/product-photo.png`. It is never part of this repo.
 
 1. **Find a top view.** On the product page at logitechg.com, the gallery images are
    under `https://resource.logitechg.com/<format>/content/dam/gaming/…/gallery/…-top-angle-…png`.
@@ -113,8 +108,8 @@ Without any picture, the page shows a generic device icon with one colored dot p
 
 ## Buttons the host handles
 
-When glowden takes over a mouse's lighting, the mouse switches to host mode and leaves some
-buttons to the host. On the G502 X PLUS these are DPI up, DPI down and DPI shift. glowden
+When GlowDen takes over a mouse's lighting, the mouse switches to host mode and leaves some
+buttons to the host. On the G502 X PLUS these are DPI up, DPI down and DPI shift. GlowDen
 watches them through the button spy feature (`0x8110`) and steps through the DPI levels
 from the Sensitivity panel; the level chosen with the buttons is saved.
 
@@ -131,7 +126,7 @@ button n is bit n−1.
 
 The same feature lets the Assignments page give any button another job (a key or shortcut,
 a macro, a mouse button, scrolling, DPI, a program). An assigned button is told to send
-nothing to the PC, and glowden performs its action through a virtual input device
+nothing to the PC, and GlowDen performs its action through a virtual input device
 (`/dev/uinput`, see `packaging/udev`). Name the buttons and set what unassigned buttons send:
 
 ```toml
@@ -175,10 +170,10 @@ reactive = true      # read key presses from the device for reactive effects
 
 In this order; a later file wins for the same product id:
 
-1. `/usr/share/glowden/drivers/` (shipped definitions)
-2. `drivers/` in the repo (development builds)
-3. `~/.local/share/glowden/drivers/` (your own)
-4. directories in `$GLOWDEN_DRIVERS`
+1. definitions installed from device sources (this repo's releases are the built-in source;
+   during development, `tools/make-index.py dist` and add `dist/` as a source)
+2. `~/.local/share/glowden/drivers/` (your own)
+3. directories in `$GLOWDEN_DRIVERS`
 
 ## Field reference
 
@@ -194,14 +189,14 @@ In this order; a later file wins for the same product id:
 | `input.dpi_up`, `.dpi_down`, `.dpi_shift` | Button-spy masks of host-handled DPI buttons |
 | `input.routing` | What each button sends to the PC when unassigned |
 | `[[button]]` `number`, `label` | Button names on the Assignments page |
-| `[voice]` `source`, `description` | Blue VO!CE: PipeWire source to process, virtual mic name |
+| `[voice]` `plugin`, `source`, `description`, `on_enable` | Blue VO!CE: plugin id, PipeWire source to process, virtual mic name, HID++ requests (`feature:function:hex`) sent when it's switched on |
 | `[[firmware_effect]]` | Firmware effects |
 
 ## Probing and captures
 
 - `glowdenctl <device> call <feature> <function> [hex params]` sends one HID++ request and prints
   the reply. Use reads (usually function 0 or 1) first, and follow the device safety rules
-  in `CLAUDE.md` before writing anything.
+  in GlowDen's `CLAUDE.md` before writing anything.
 - `GLOWDEN_DEBUG=1` prints every frame the CLI or service sends and receives.
 - To see what G HUB does, run it in a Windows VM with the device passed through and record
   the USB traffic with the scripts in `../vm/` (next to this repo, not part of it):
@@ -211,7 +206,8 @@ In this order; a later file wins for the same product id:
 
 ## When data isn't enough
 
-New protocol behaviour (a feature glowden doesn't implement yet) goes in
+New standard HID++ behaviour (a feature GlowDen doesn't implement yet) goes in GlowDen's
 `crates/hidpp/src/devices.rs` as a function per feature, keyed by HID++ feature id, so every
-device with that feature gets it. Record where the bytes came from (USB capture, device
+device with that feature gets it. Behaviour only one device needs goes in a plugin here
+(`plugins/<id>/`, any language, JSON lines on stdin/stdout; see `plugins/blue-voice`). Record where the bytes came from (USB capture, device
 reply) in a comment.
