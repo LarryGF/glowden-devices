@@ -8,7 +8,7 @@
  *   glowden-voice <dll> [--target NODE] [--name NAME] [--description TEXT]
  *              [f OFF VALUE]... [b OFF VALUE]... [u OFF VALUE]...
  *
- * f/b/u set a float, byte or u32 in the parameter block (offsets in hex, see docs/voice.md).
+ * f/b/u set a float, byte or u32 in the parameter block (offsets in hex; the field map is in main.rs).
  * Settings may be split into sections: "@cv2" (VO!CE) and the voice effect stages "@vocal",
  * "@flanger", "@ring", "@reverb", "@delay", each followed by its own f/b/u triples. Settings
  * before any section are VO!CE's; once sections are used, a stage left out is bypassed.

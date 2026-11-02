@@ -161,7 +161,7 @@ fn describe() -> Value {
 }
 
 /// Preset field → (offset in the engine's parameter block, 'f' float or 'b' byte).
-/// Measured one field at a time with tools/voice-probes/field_probe; see docs/voice.md.
+/// Measured one field at a time by signal probing.
 const FIELDS: &[(&str, u16, char)] = &[
     ("highPassFilter.enabled", 0x014, 'b'),
     ("highPassFilter.frequency", 0x010, 'f'),
@@ -230,7 +230,7 @@ pub fn engine_args(settings: &Value) -> Vec<String> {
 /// Voice effect stage → host section, the field enabling it, and its fields: (preset field,
 /// offset, kind, enum names in value order). The layouts follow G HUB's field order, which
 /// matches each stage's default parameters; offsets and the enable bytes were checked on a
-/// test tone (tools/voice-probes/stage_probe). Fields G HUB leaves out are 0/false/the first
+/// test tone. Fields G HUB leaves out are 0/false/the first
 /// enum value, as in its settings format.
 type EffectField = (&'static str, u16, char, &'static [&'static str]);
 const EFFECTS: &[(&str, &str, Option<&str>, u16, &[EffectField])] = &[
@@ -416,7 +416,7 @@ pub fn host_args(voice: Option<&Value>, effects: Option<&Value>) -> Vec<String> 
 
 /// Fine-tuning controls offered on top of a preset (G HUB's advanced VO!CE controls): preset
 /// field, group, label, min, max, step, unit. Ranges stay inside what the engine was seen to
-/// accept (tools/voice-probes/field_probe).
+/// accept.
 pub const CONTROLS: &[(&str, &str, &str, f64, f64, f64, &str)] = &[
     (
         "highPassFilter.frequency",
