@@ -1,6 +1,6 @@
 # GlowDen devices
 
-Device definitions and plugins for [GlowDen](https://github.com/glowden/glowden), the open
+Device definitions and plugins for [GlowDen](https://github.com/larryGF/glowden), the open
 device hub for Logitech G peripherals on Linux. GlowDen reads this repository's releases as
 its built-in device source; anyone can publish a source of their own in the same format.
 
