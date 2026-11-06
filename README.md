@@ -7,7 +7,7 @@ device hub for Logitech G peripherals on Linux. GlowDen reads this repository's 
 its built-in device source; anyone can publish a source of their own in the same format.
 
 Not affiliated with Logitech. Definitions describe protocol facts (product ids, feature
-numbers, parameter layouts); no Logitech or DTS files are part of this repository.
+numbers, parameter layouts); no Logitech or DTS files are part of this repository. See [`NOTICE.md`](NOTICE.md).
 
 ## Using it
 
