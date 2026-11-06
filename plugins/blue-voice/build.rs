@@ -18,10 +18,10 @@ fn main() {
             build.include(dir);
         } else if let Some(lib) = f.strip_prefix("-l") {
             println!("cargo:rustc-link-lib={lib}");
-        } else if f.starts_with("-D") {
-            let (k, v) = f[2..]
+        } else if let Some(def) = f.strip_prefix("-D") {
+            let (k, v) = def
                 .split_once('=')
-                .map_or((&f[2..], None), |(k, v)| (k, Some(v)));
+                .map_or((def, None), |(k, v)| (k, Some(v)));
             build.define(k, v);
         }
     }

@@ -44,11 +44,16 @@ fn main() {
                 .collect();
             let mut argv: Vec<*mut c_char> = c.iter().map(|a| a.as_ptr() as *mut c_char).collect();
             argv.push(std::ptr::null_mut());
-            std::process::exit(unsafe { blue_voice_host_main(c.len() as c_int, argv.as_mut_ptr()) });
+            std::process::exit(unsafe {
+                blue_voice_host_main(c.len() as c_int, argv.as_mut_ptr())
+            });
         }
         Some("serve") => serve(),
         _ => {
-            eprintln!("usage: {} serve   (GlowDen plugin protocol on stdin/stdout)", args[0]);
+            eprintln!(
+                "usage: {} serve   (GlowDen plugin protocol on stdin/stdout)",
+                args[0]
+            );
             std::process::exit(2);
         }
     }
@@ -98,7 +103,12 @@ fn serve() {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .filter_map(|x| Some((x["name"].as_str()?.to_string(), json!(effect_chips(&x["settings"])))))
+                    .filter_map(|x| {
+                        Some((
+                            x["name"].as_str()?.to_string(),
+                            json!(effect_chips(&x["settings"])),
+                        ))
+                    })
                     .collect(),
             )),
             "start" => {
@@ -160,7 +170,14 @@ fn start(p: &Value) -> Result<Child, String> {
     let mut child = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
         .arg("host")
         .arg(s("engine")?)
-        .args(["--target", s("source")?, "--name", s("name")?, "--description", s("description")?])
+        .args([
+            "--target",
+            s("source")?,
+            "--name",
+            s("name")?,
+            "--description",
+            s("description")?,
+        ])
         .args(settings_args(p))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -193,7 +210,14 @@ fn start_preview(p: &Value) -> Result<Child, String> {
     Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
         .arg("host")
         .arg(s("engine")?)
-        .args(["--name", "glowden-voice-preview", "--description", "GlowDen mic test", "--play", s("file")?])
+        .args([
+            "--name",
+            "glowden-voice-preview",
+            "--description",
+            "GlowDen mic test",
+            "--play",
+            s("file")?,
+        ])
         .args(settings_args(p))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -212,16 +236,21 @@ fn process(p: &Value) -> Result<Value, String> {
         .stdout(Stdio::null())
         .status()
         .map_err(|e| e.to_string())?;
-    status.success().then_some(Value::Null).ok_or_else(|| "processing failed".into())
+    status
+        .success()
+        .then_some(Value::Null)
+        .ok_or_else(|| "processing failed".into())
 }
 
 fn describe() -> Value {
     let modes = |list: &[&str]| -> Value {
-        json!(list.iter().map(|m| json!({ "value": m, "label": mode_label(m) })).collect::<Vec<_>>())
+        json!(
+            list.iter()
+                .map(|m| json!({ "value": m, "label": mode_label(m) }))
+                .collect::<Vec<_>>()
+        )
     };
-    let slider = |field: &str, label: &str, min: f64, max: f64, step: f64, unit: &str| {
-        json!({ "field": field, "label": label, "min": min, "max": max, "step": step, "unit": unit })
-    };
+    let slider = |field: &str, label: &str, min: f64, max: f64, step: f64, unit: &str| json!({ "field": field, "label": label, "min": min, "max": max, "step": step, "unit": unit });
     let pick = |field: &str, label: &str, list: &[&str]| json!({ "field": field, "label": label, "modes": modes(list) });
     json!({
         "controls": CONTROLS.iter().map(|(path, group, label, min, max, step, unit)| {
@@ -278,7 +307,15 @@ fn describe() -> Value {
 /// "VOCAL_MODE_FORMANT_WARP" → "Formant warp".
 fn mode_label(mode: &str) -> String {
     let mut w = mode.to_string();
-    for prefix in ["VOCAL_MODE_", "PHASER_MODE_", "REFLECTION_MODE_", "SHAPE_MODE_", "INPUT_MODE_", "FEEDBACK_MODE_", "FEEDBACK_TIMBRE_"] {
+    for prefix in [
+        "VOCAL_MODE_",
+        "PHASER_MODE_",
+        "REFLECTION_MODE_",
+        "SHAPE_MODE_",
+        "INPUT_MODE_",
+        "FEEDBACK_MODE_",
+        "FEEDBACK_TIMBRE_",
+    ] {
         if let Some(rest) = w.strip_prefix(prefix) {
             w = rest.to_string();
             break;
@@ -296,7 +333,9 @@ fn mode_label(mode: &str) -> String {
         _ => w,
     };
     let mut c = w.chars();
-    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+    c.next()
+        .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+        .unwrap_or_default()
 }
 
 /// Our own wording for G HUB's VO!CE preset names, "<placement> - <character>".
@@ -315,7 +354,12 @@ fn preset_note(name: &str) -> String {
         "Boom Arm" => "Mic on a boom arm, close to your mouth.",
         _ => "",
     };
-    [how, r#where].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" ")
+    [how, r#where]
+        .iter()
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// What an effect preset turns on, as short labels.
@@ -323,13 +367,21 @@ fn effect_chips(s: &Value) -> Vec<String> {
     let on = |stage: &str, key: &str| s[stage][key] == true;
     let mut out = Vec::new();
     let v = &s["vocalChanger"];
-    for (mode, factor) in [("vocalMode1", "voiceModFactor1"), ("vocalMode2", "voiceModFactor2")] {
+    for (mode, factor) in [
+        ("vocalMode1", "voiceModFactor1"),
+        ("vocalMode2", "voiceModFactor2"),
+    ] {
         let Some(m) = v[mode].as_str().filter(|m| *m != "VOCAL_MODE_OFF") else {
             continue;
         };
         let semis = (v[factor].as_f64().unwrap_or(0.0) / 10.0).round() / 10.0;
         out.push(if m.contains("PITCH") || m.contains("FORMANT") {
-            format!("{} {}{} st", mode_label(m), if semis > 0.0 { "+" } else { "" }, semis)
+            format!(
+                "{} {}{} st",
+                mode_label(m),
+                if semis > 0.0 { "+" } else { "" },
+                semis
+            )
         } else {
             mode_label(m)
         });
@@ -338,10 +390,19 @@ fn effect_chips(s: &Value) -> Vec<String> {
         out.push("Chorus".into());
     }
     if on("flangerPhaser", "enabled") {
-        out.push(mode_label(s["flangerPhaser"]["phaserMode"].as_str().unwrap_or("PHASER_MODE_FLANGER_UP")));
+        out.push(mode_label(
+            s["flangerPhaser"]["phaserMode"]
+                .as_str()
+                .unwrap_or("PHASER_MODE_FLANGER_UP"),
+        ));
     }
     if on("ringModulation", "enabled") {
-        out.push(format!("Ring mod {} Hz", s["ringModulation"]["carrierFrequency"].as_f64().unwrap_or(0.0)));
+        out.push(format!(
+            "Ring mod {} Hz",
+            s["ringModulation"]["carrierFrequency"]
+                .as_f64()
+                .unwrap_or(0.0)
+        ));
     }
     if on("reverb", "enabled") {
         out.push("Reverb".into());
@@ -425,7 +486,14 @@ pub fn engine_args(settings: &Value) -> Vec<String> {
 /// test tone. Fields G HUB leaves out are 0/false/the first
 /// enum value, as in its settings format.
 type EffectField = (&'static str, u16, char, &'static [&'static str]);
-const EFFECTS: &[(&str, &str, Option<&str>, u16, &[EffectField])] = &[
+type EffectStage = (
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    u16,
+    &'static [EffectField],
+);
+const EFFECTS: &[EffectStage] = &[
     (
         "vocalChanger",
         "@vocal",
