@@ -1,0 +1,40 @@
+name: Device support
+description: Ask for a device to be supported, or report one that only partly works
+labels: [device]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Many Logitech G devices already work in part without a definition (lighting,
+        brightness, DPI, battery). A definition adds the device's kind, picture, LED
+        positions and anything the host has to handle. See ADDING-DEVICES.md if you'd like
+        to write one yourself.
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Name and how it's connected (USB, LIGHTSPEED receiver, Bluetooth)
+      placeholder: G305 LIGHTSPEED, through its receiver
+    validations:
+      required: true
+  - type: textarea
+    id: list
+    attributes:
+      label: glowdenctl list
+      description: Output of `glowdenctl list` with the device connected (product id and features)
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: works
+    attributes:
+      label: What works and what doesn't
+      description: What you tried in GlowDen, and what G HUB can do with it that GlowDen can't
+    validations:
+      required: true
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Testing
+      options:
+        - label: I can test builds or definitions on this device

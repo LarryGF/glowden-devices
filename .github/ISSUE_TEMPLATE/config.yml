@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Bug in the GlowDen app or service
+    url: https://github.com/LarryGF/glowden/issues/new?template=bug.yml
+    about: Problems not specific to one device's definition go to the main repo.
